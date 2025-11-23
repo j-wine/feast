@@ -128,3 +128,19 @@ def test_get_features_for_entity(redis_online_store: RedisOnlineStore, feature_v
     assert "feature_view_1:feature_11" in features
     assert features["feature_view_1:feature_10"].int32_val == 1
     assert features["feature_view_1:feature_11"].int32_val == 2
+
+
+def test_generate_entity_redis_keys_empty_entities(
+    redis_online_store: RedisOnlineStore, repo_config
+):
+    """Test that empty entity keys can be generated (for feature views with no entities)."""
+    entity_keys = [
+        EntityKeyProto(join_keys=[], entity_values=[]),
+    ]
+
+    actual = redis_online_store._generate_redis_keys_for_entities(
+        repo_config, entity_keys
+    )
+    # Empty entity key should serialize to 4 bytes (count of 0) + project name
+    expected = [b"\x00\x00\x00\x00test"]
+    assert actual == expected

@@ -151,3 +151,30 @@ def test_reserialize_entity_v2_key_to_v3():
         join_keys=["user"],
         entity_values=[ValueProto(int64_val=int(2**15))],
     )
+
+
+def test_serialize_empty_entity_key():
+    """Test serialization and deserialization of empty entity keys (feature views with no entities)."""
+    # Create an empty entity key (no entities)
+    entity_key_proto = EntityKeyProto(join_keys=[], entity_values=[])
+
+    # Should not raise an error
+    serialized_key = serialize_entity_key(
+        entity_key_proto,
+        entity_key_serialization_version=3,
+    )
+
+    # Verify the serialized key has the expected format (just the count of 0 keys)
+    # For version 3, this should be 4 bytes with value 0
+    assert len(serialized_key) == 4
+    assert serialized_key == b"\x00\x00\x00\x00"
+
+    # Deserialize and verify round-trip
+    deserialized_key = deserialize_entity_key(
+        serialized_key,
+        entity_key_serialization_version=3,
+    )
+
+    assert deserialized_key == entity_key_proto
+    assert len(deserialized_key.join_keys) == 0
+    assert len(deserialized_key.entity_values) == 0
