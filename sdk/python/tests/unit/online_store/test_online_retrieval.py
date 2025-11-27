@@ -16,6 +16,7 @@ from feast import FeatureStore, RepoConfig
 from feast.errors import FeatureViewNotFoundException
 from feast.protos.feast.types.EntityKey_pb2 import EntityKey as EntityKeyProto
 from feast.protos.feast.types.Value_pb2 import FloatList as FloatListProto
+from feast.protos.feast.types.Value_pb2 import StringList as StringListProto
 from feast.protos.feast.types.Value_pb2 import Value as ValueProto
 from feast.repo_config import RegistryConfig
 from feast.torch_wrapper import get_torch
@@ -1714,3 +1715,118 @@ def test_milvus_keyword_search() -> None:
         assert len(result_hybrid["content"]) > 0
         assert any("Feast" in content for content in result_hybrid["content"])
         assert len(result_hybrid["vector"]) > 0
+
+
+def test_milvus_graph_rag_neighbors_round_trip() -> None:
+    """Validate graph-style metadata with array fields can be stored and retrieved via Milvus."""
+
+    from datetime import timedelta
+
+    from feast import Entity, FeatureView, Field, FileSource
+    from feast.types import Array, Float32, String, UnixTimestamp
+
+    runner = CliRunner()
+    vector_length = 6
+
+    with runner.local_repo(
+        get_example_repo("example_feature_repo_1.py"),
+        offline_store="file",
+        online_store="milvus",
+        apply=False,
+        teardown=False,
+    ) as store:
+        graph_entity = Entity(
+            name="entity_id", join_keys=["entity_id"], value_type=ValueType.STRING
+        )
+
+        graph_source = FileSource(
+            path="data/graph_entities.parquet",
+            timestamp_field="event_timestamp",
+            created_timestamp_column="event_timestamp",
+        )
+
+        graph_view = FeatureView(
+            name="graph_entities",
+            entities=[graph_entity],
+            schema=[
+                Field(
+                    name="embedding",
+                    dtype=Array(Float32),
+                    vector_index=True,
+                    vector_search_metric="COSINE",
+                ),
+                Field(name="entity_id", dtype=String),
+                Field(name="neighbors", dtype=Array(String)),
+                Field(name="edge_types", dtype=Array(String)),
+                Field(name="event_timestamp", dtype=UnixTimestamp),
+            ],
+            source=graph_source,
+            ttl=timedelta(hours=24),
+        )
+
+        store.apply([graph_source, graph_view])
+
+        provider = store._get_provider()
+
+        graph_rows = [
+            {
+                "entity_id": "a",
+                "neighbors": ["b", "c"],
+                "edge_types": ["friend", "colleague"],
+                "embedding": np.linspace(0.1, 0.6, vector_length),
+            },
+            {
+                "entity_id": "b",
+                "neighbors": ["a"],
+                "edge_types": ["friend"],
+                "embedding": np.linspace(0.2, 0.7, vector_length),
+            },
+        ]
+
+        data = []
+        for row in graph_rows:
+            data.append(
+                (
+                    EntityKeyProto(
+                        join_keys=["entity_id"],
+                        entity_values=[ValueProto(string_val=row["entity_id"])],
+                    ),
+                    {
+                        "embedding": ValueProto(
+                            float_list_val=FloatListProto(val=row["embedding"])
+                        ),
+                        "entity_id": ValueProto(string_val=row["entity_id"]),
+                        "neighbors": ValueProto(
+                            string_list_val=StringListProto(val=row["neighbors"])
+                        ),
+                        "edge_types": ValueProto(
+                            string_list_val=StringListProto(val=row["edge_types"])
+                        ),
+                    },
+                    _utc_now(),
+                    _utc_now(),
+                )
+            )
+
+        provider.online_write_batch(
+            config=store.config,
+            table=graph_view,
+            data=data,
+            progress=None,
+        )
+
+        query_embedding = graph_rows[0]["embedding"].tolist()
+
+        result = store.retrieve_online_documents_v2(
+            features=[
+                "graph_entities:neighbors",
+                "graph_entities:edge_types",
+                "graph_entities:embedding",
+            ],
+            query=query_embedding,
+            top_k=2,
+        ).to_dict()
+
+        assert result["neighbors"][0] == graph_rows[0]["neighbors"]
+        assert result["edge_types"][0] == graph_rows[0]["edge_types"]
+        assert len(result["embedding"][0]) == vector_length

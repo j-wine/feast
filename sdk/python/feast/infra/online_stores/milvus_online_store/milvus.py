@@ -47,6 +47,7 @@ PROTO_TO_MILVUS_TYPE_MAPPING: Dict[ValueType, DataType] = {
     ValueType.IMAGE_BYTES: DataType.VARCHAR,
     PROTO_VALUE_TO_VALUE_TYPE_MAP["bool_val"]: DataType.BOOL,
     PROTO_VALUE_TO_VALUE_TYPE_MAP["string_val"]: DataType.VARCHAR,
+    PROTO_VALUE_TO_VALUE_TYPE_MAP["string_list_val"]: DataType.ARRAY,
     PROTO_VALUE_TO_VALUE_TYPE_MAP["float_val"]: DataType.FLOAT,
     PROTO_VALUE_TO_VALUE_TYPE_MAP["double_val"]: DataType.DOUBLE,
     PROTO_VALUE_TO_VALUE_TYPE_MAP["int32_val"]: DataType.INT32,
@@ -55,7 +56,16 @@ PROTO_TO_MILVUS_TYPE_MAPPING: Dict[ValueType, DataType] = {
     PROTO_VALUE_TO_VALUE_TYPE_MAP["int32_list_val"]: DataType.FLOAT_VECTOR,
     PROTO_VALUE_TO_VALUE_TYPE_MAP["int64_list_val"]: DataType.FLOAT_VECTOR,
     PROTO_VALUE_TO_VALUE_TYPE_MAP["double_list_val"]: DataType.FLOAT_VECTOR,
-    PROTO_VALUE_TO_VALUE_TYPE_MAP["bool_list_val"]: DataType.BINARY_VECTOR,
+    PROTO_VALUE_TO_VALUE_TYPE_MAP["bool_list_val"]: DataType.ARRAY,
+}
+
+VALUE_TYPE_TO_LIST_PROTO_ATTR: Dict[ValueType, str] = {
+    ValueType.INT32: "int32_list_val",
+    ValueType.INT64: "int64_list_val",
+    ValueType.FLOAT: "float_list_val",
+    ValueType.DOUBLE: "double_list_val",
+    ValueType.STRING: "string_list_val",
+    ValueType.BOOL: "bool_list_val",
 }
 
 FEAST_PRIMITIVE_TO_MILVUS_TYPE_MAPPING: Dict[
@@ -78,9 +88,9 @@ for value_type, feast_type in VALUE_TYPES_TO_FEAST_TYPES.items():
         ]:
             FEAST_PRIMITIVE_TO_MILVUS_TYPE_MAPPING[feast_type] = DataType.FLOAT_VECTOR
         elif base_value_type == ValueType.STRING:
-            FEAST_PRIMITIVE_TO_MILVUS_TYPE_MAPPING[feast_type] = DataType.VARCHAR
+            FEAST_PRIMITIVE_TO_MILVUS_TYPE_MAPPING[feast_type] = DataType.ARRAY
         elif base_value_type == ValueType.BOOL:
-            FEAST_PRIMITIVE_TO_MILVUS_TYPE_MAPPING[feast_type] = DataType.BINARY_VECTOR
+            FEAST_PRIMITIVE_TO_MILVUS_TYPE_MAPPING[feast_type] = DataType.ARRAY
 
 
 class MilvusOnlineStoreConfig(FeastConfigBaseModel, VectorStoreConfig):
@@ -170,8 +180,25 @@ class MilvusOnlineStore(OnlineStore):
             ]
             fields_to_add = [f for f in table.schema if f.name not in fields_to_exclude]
             for field in fields_to_add:
-                dtype = FEAST_PRIMITIVE_TO_MILVUS_TYPE_MAPPING.get(field.dtype)
-                if dtype:
+                feast_dtype = field.dtype
+                dtype = FEAST_PRIMITIVE_TO_MILVUS_TYPE_MAPPING.get(feast_dtype)
+                array_element_type = (
+                    _get_array_element_milvus_type(feast_dtype)
+                    if isinstance(feast_dtype, Array) and not field.vector_index
+                    else None
+                )
+
+                if array_element_type:
+                    array_kwargs = {
+                        "name": field.name,
+                        "dtype": DataType.ARRAY,
+                        "element_type": array_element_type,
+                        "max_capacity": 1024,
+                    }
+                    if array_element_type == DataType.VARCHAR:
+                        array_kwargs["max_length"] = 512
+                    fields.append(FieldSchema(**array_kwargs))
+                elif dtype:
                     if dtype == DataType.FLOAT_VECTOR:
                         fields.append(
                             FieldSchema(
@@ -180,7 +207,17 @@ class MilvusOnlineStore(OnlineStore):
                                 dim=config.online_store.embedding_dim,
                             )
                         )
-                    else:
+                    elif dtype == DataType.ARRAY:
+                        fields.append(
+                            FieldSchema(
+                                name=field.name,
+                                dtype=DataType.ARRAY,
+                                element_type=DataType.VARCHAR,
+                                max_length=512,
+                                max_capacity=1024,
+                            )
+                        )
+                    elif dtype == DataType.VARCHAR:
                         fields.append(
                             FieldSchema(
                                 name=field.name,
@@ -188,6 +225,8 @@ class MilvusOnlineStore(OnlineStore):
                                 max_length=512,
                             )
                         )
+                    else:
+                        fields.append(FieldSchema(name=field.name, dtype=dtype))
 
             schema = CollectionSchema(
                 fields=fields, description="Feast feature view data"
@@ -395,35 +434,54 @@ class MilvusOnlineStore(OnlineStore):
                             )
                         )
                         feature_fv_dtype = from_feast_type(feature_feast_primitive_type)
-                        proto_attr = VALUE_TYPE_TO_PROTO_VALUE_MAP.get(feature_fv_dtype)
-                        if proto_attr:
-                            if proto_attr == "bytes_val":
-                                setattr(val, proto_attr, field_value.encode())
-                            elif proto_attr in [
-                                "int32_val",
-                                "int64_val",
-                                "float_val",
-                                "double_val",
-                                "string_val",
-                            ]:
-                                setattr(
-                                    val,
-                                    proto_attr,
-                                    type(getattr(val, proto_attr))(field_value),
-                                )
-                            elif proto_attr in [
-                                "int32_list_val",
-                                "int64_list_val",
-                                "float_list_val",
-                                "double_list_val",
-                            ]:
-                                getattr(val, proto_attr).val.extend(field_value)
-                            else:
-                                setattr(val, proto_attr, field_value)
-                        else:
-                            raise ValueError(
-                                f"Unsupported ValueType: {feature_feast_primitive_type} with feature view value {field_value} for feature {field} with value type {proto_attr}"
+                        if isinstance(feature_feast_primitive_type, Array):
+                            base_value_type = (
+                                feature_feast_primitive_type.base_type.to_value_type()
                             )
+                            list_proto_attr = VALUE_TYPE_TO_LIST_PROTO_ATTR.get(
+                                base_value_type
+                            )
+                            if list_proto_attr:
+                                getattr(val, list_proto_attr).val.extend(
+                                    field_value or []
+                                )
+                            else:
+                                raise ValueError(
+                                    f"Unsupported array base type {base_value_type} for feature {field}"
+                                )
+                        else:
+                            proto_attr = VALUE_TYPE_TO_PROTO_VALUE_MAP.get(
+                                feature_fv_dtype
+                            )
+                            if proto_attr:
+                                if proto_attr == "bytes_val":
+                                    setattr(val, proto_attr, field_value.encode())
+                                elif proto_attr in [
+                                    "int32_val",
+                                    "int64_val",
+                                    "float_val",
+                                    "double_val",
+                                    "string_val",
+                                ]:
+                                    setattr(
+                                        val,
+                                        proto_attr,
+                                        type(getattr(val, proto_attr))(field_value),
+                                    )
+                                elif proto_attr in [
+                                    "int32_list_val",
+                                    "int64_list_val",
+                                    "float_list_val",
+                                    "double_list_val",
+                                    "string_list_val",
+                                ]:
+                                    getattr(val, proto_attr).val.extend(field_value)
+                                else:
+                                    setattr(val, proto_attr, field_value)
+                            else:
+                                raise ValueError(
+                                    f"Unsupported ValueType: {feature_feast_primitive_type} with feature view value {field_value} for feature {field} with value type {proto_attr}"
+                                )
                         # res[field] = val
                         key_to_use = field.split(":", 1)[-1] if ":" in field else field
                         res[key_to_use] = val
@@ -505,6 +563,13 @@ class MilvusOnlineStore(OnlineStore):
         entity_name_feast_primitive_type_map = {
             k.name: k.dtype for k in table.entity_columns
         }
+        feature_name_feast_primitive_type_map = {
+            f.name: f.dtype for f in table.features
+        }
+        if getattr(table, "write_to_online_store", False):
+            feature_name_feast_primitive_type_map.update(
+                {f.name: f.dtype for f in table.schema}
+            )
         self.client = self._connect(config)
         collection_name = _table_id(config.project, table)
         collection = self._get_or_create_collection(config, table)
@@ -540,6 +605,11 @@ class MilvusOnlineStore(OnlineStore):
                     break
 
         self.client.load_collection(collection_name)
+
+        primitive_type_map = {
+            **feature_name_feast_primitive_type_map,
+            **entity_name_feast_primitive_type_map,
+        }
 
         if (
             embedding is not None
@@ -656,6 +726,9 @@ class MilvusOnlineStore(OnlineStore):
                 for field in output_fields:
                     val = ValueProto()
                     field_value = hit.get("entity", {}).get(field, None)
+                    field_type = primitive_type_map.get(
+                        field, PrimitiveFeastType.INVALID
+                    )
                     # entity_key_proto = None
                     if field in ["created_ts", "event_ts"]:
                         res_ts = datetime.fromtimestamp(field_value / 1e6)
@@ -664,31 +737,29 @@ class MilvusOnlineStore(OnlineStore):
                             embedding
                         )
                         res[ann_search_field] = serialized_embedding
-                    elif (
-                        entity_name_feast_primitive_type_map.get(
-                            field, PrimitiveFeastType.INVALID
-                        )
-                        == PrimitiveFeastType.STRING
-                    ):
+                    elif field_type == PrimitiveFeastType.STRING:
                         res[field] = ValueProto(string_val=str(field_value))
-                    elif (
-                        entity_name_feast_primitive_type_map.get(
-                            field, PrimitiveFeastType.INVALID
-                        )
-                        == PrimitiveFeastType.BYTES
-                    ):
+                    elif field_type == PrimitiveFeastType.BYTES:
                         try:
                             decoded_bytes = base64.b64decode(field_value)
                             res[field] = ValueProto(bytes_val=decoded_bytes)
                         except Exception:
                             res[field] = ValueProto(string_val=str(field_value))
-                    elif entity_name_feast_primitive_type_map.get(
-                        field, PrimitiveFeastType.INVALID
-                    ) in [
+                    elif field_type in [
                         PrimitiveFeastType.INT64,
                         PrimitiveFeastType.INT32,
                     ]:
                         res[field] = ValueProto(int64_val=int(field_value))
+                    elif isinstance(field_type, Array):
+                        base_value_type = field_type.base_type.to_value_type()
+                        list_proto_attr = VALUE_TYPE_TO_LIST_PROTO_ATTR.get(
+                            base_value_type
+                        )
+                        if list_proto_attr:
+                            getattr(val, list_proto_attr).val.extend(field_value or [])
+                            res[field] = val
+                        else:
+                            res[field] = ValueProto(string_val=str(field_value))
                     elif field == composite_key_name:
                         pass
                     elif isinstance(field_value, bytes):
@@ -713,6 +784,19 @@ def _get_composite_key_name(table: FeatureView) -> str:
     return "_".join([field.name for field in table.entity_columns]) + "_pk"
 
 
+def _get_array_element_milvus_type(array_type: Array) -> Optional[DataType]:
+    base_value_type = array_type.base_type.to_value_type()
+    array_element_map = {
+        ValueType.INT32: DataType.INT32,
+        ValueType.INT64: DataType.INT64,
+        ValueType.FLOAT: DataType.FLOAT,
+        ValueType.DOUBLE: DataType.DOUBLE,
+        ValueType.STRING: DataType.VARCHAR,
+        ValueType.BOOL: DataType.BOOL,
+    }
+    return array_element_map.get(base_value_type)
+
+
 def _extract_proto_values_to_dict(
     input_dict: Dict[str, Any],
     vector_cols: List[str],
@@ -721,8 +805,12 @@ def _extract_proto_values_to_dict(
     numeric_vector_list_types = [
         k
         for k in PROTO_VALUE_TO_VALUE_TYPE_MAP.keys()
-        if k is not None and "list" in k and "string" not in k
+        if k is not None and "list" in k and "string" not in k and k != "bool_list_val"
     ]
+    string_vector_list_types = [
+        "string_list_val",
+    ]
+    bool_vector_list_types = ["bool_list_val"]
     numeric_types = [
         "double_val",
         "float_val",
@@ -742,6 +830,14 @@ def _extract_proto_values_to_dict(
                             ).SerializeToString()
                         else:
                             vector_values = getattr(feature_values, proto_val_type).val
+                    elif proto_val_type in string_vector_list_types:
+                        vector_values = list(
+                            getattr(feature_values, proto_val_type).val
+                        )
+                    elif proto_val_type in bool_vector_list_types:
+                        vector_values = list(
+                            getattr(feature_values, proto_val_type).val
+                        )
                     else:
                         if (
                             serialize_to_string
