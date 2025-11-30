@@ -263,9 +263,14 @@ class LocalOutputNode(LocalNode):
         if input_table.num_rows == 0:
             return input_table
 
-        chunk_size = getattr(
+        raw_chunk_size = getattr(
             getattr(context.repo_config, "batch_engine", None), "chunk_size", None
         )
+        try:
+            chunk_size = int(raw_chunk_size) if raw_chunk_size is not None else None
+        except (TypeError, ValueError):
+            chunk_size = None
+
         if chunk_size and chunk_size > 0:
             batches = input_table.to_batches(max_chunksize=chunk_size)
         else:
