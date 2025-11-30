@@ -438,6 +438,22 @@ class SparkRetrievalJob(RetrievalJob):
                 normalized.append(f"file://{path}")
         return normalized
 
+    def to_arrow_batches(
+        self, batch_size: Optional[int] = None, timeout: Optional[int] = None
+    ):
+        if self._should_use_staging_for_arrow():
+            paths = self.to_remote_storage()
+            if not paths:
+                return iter([])
+
+            normalized_paths = self._normalize_staging_paths(paths)
+            dataset = ds.dataset(normalized_paths, format="parquet")
+            scanner = dataset.scan()
+            return scanner.to_batches(batch_size=batch_size)
+
+        table = self._to_arrow_internal(timeout=timeout)
+        return table.to_batches(max_chunksize=batch_size)
+
     def to_feast_df(
         self,
         validation_reference: Optional["ValidationReference"] = None,

@@ -556,3 +556,66 @@ def test_to_remote_storage_lists_with_azure_scheme(mock_list_azure_files):
     )
     mock_list_azure_files.assert_called_once()
     assert result == mock_list_azure_files.return_value
+
+
+def test_to_arrow_batches_uses_staging(monkeypatch, tmp_path):
+    repo_config = RepoConfig(
+        project="test_project",
+        registry="test_registry",
+        provider="local",
+        offline_store=SparkOfflineStoreConfig(
+            type="spark",
+            staging_location=str(tmp_path),
+            staging_allow_materialize=True,
+        ),
+    )
+
+    job = SparkRetrievalJob(
+        spark_session=MagicMock(),
+        query="select 1",
+        full_feature_names=False,
+        config=repo_config,
+    )
+
+    monkeypatch.setattr(
+        job, "to_remote_storage", MagicMock(return_value=["file:///test.parquet"])
+    )
+    scanner_mock = MagicMock()
+    scanner_mock.to_batches.return_value = ["b1", "b2"]
+    dataset_mock = MagicMock()
+    dataset_mock.scan.return_value = scanner_mock
+    monkeypatch.setattr(
+        spark_module.ds, "dataset", MagicMock(return_value=dataset_mock)
+    )
+
+    batches = list(job.to_arrow_batches(batch_size=42))
+
+    job.to_remote_storage.assert_called_once()
+    spark_module.ds.dataset.assert_called_once()
+    scanner_mock.to_batches.assert_called_once_with(batch_size=42)
+    assert batches == ["b1", "b2"]
+
+
+def test_to_arrow_batches_without_staging(monkeypatch):
+    repo_config = RepoConfig(
+        project="test_project",
+        registry="test_registry",
+        provider="local",
+        offline_store=SparkOfflineStoreConfig(type="spark"),
+    )
+
+    job = SparkRetrievalJob(
+        spark_session=MagicMock(),
+        query="select 1",
+        full_feature_names=False,
+        config=repo_config,
+    )
+
+    pdf = pd.DataFrame({"a": [1]})
+    table = pa.Table.from_pandas(pdf)
+    monkeypatch.setattr(job, "_to_df_internal", MagicMock(return_value=pdf))
+
+    batches = list(job.to_arrow_batches(batch_size=1))
+
+    assert len(batches) == 1
+    assert batches[0].to_pandas().equals(pdf)
