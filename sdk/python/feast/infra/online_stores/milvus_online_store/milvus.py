@@ -145,6 +145,35 @@ class MilvusOnlineStore(OnlineStore):
             db_path = config.online_store.path
         return db_path
 
+    def _get_connection_params(
+        self, config: RepoConfig, include_db_name: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Get connection parameters for MilvusClient.
+
+        Args:
+            config: The RepoConfig containing online store configuration.
+            include_db_name: Whether to include db_name in the connection params.
+
+        Returns:
+            Dictionary of connection parameters for MilvusClient.
+        """
+        params: Dict[str, Any] = {
+            "uri": f"{config.online_store.host}:{config.online_store.port}",
+        }
+
+        # Add authentication token if credentials are provided
+        if config.online_store.username and config.online_store.password:
+            params["token"] = (
+                f"{config.online_store.username}:{config.online_store.password}"
+            )
+
+        # Add database name if requested and configured
+        if include_db_name:
+            params["db_name"] = config.online_store.db_name or ""
+
+        return params
+
     def _connect(self, config: RepoConfig) -> MilvusClient:
         if not self.client:
             db_name = config.online_store.db_name or ""
@@ -158,13 +187,8 @@ class MilvusOnlineStore(OnlineStore):
                 )
                 if db_name:
                     print(f"Using database: {db_name}")
-                self.client = MilvusClient(
-                    uri=f"{config.online_store.host}:{config.online_store.port}",
-                    token=f"{config.online_store.username}:{config.online_store.password}"
-                    if config.online_store.username and config.online_store.password
-                    else "",
-                    db_name=db_name,
-                )
+                conn_params = self._get_connection_params(config, include_db_name=True)
+                self.client = MilvusClient(**conn_params)
         return self.client
 
     def _ensure_database_exists(self, config: RepoConfig) -> None:
@@ -174,6 +198,9 @@ class MilvusOnlineStore(OnlineStore):
 
         Note: This is only needed for remote Milvus instances with db_name configured.
         Local file-based Milvus (using path) doesn't support multiple databases.
+
+        Raises:
+            Exception: If database creation fails.
         """
         db_name = config.online_store.db_name
         if not db_name:
@@ -182,17 +209,18 @@ class MilvusOnlineStore(OnlineStore):
         # For remote Milvus, we need to first connect without a db_name to create the database
         if not (config.provider == "local" and config.online_store.path):
             # Create a temporary client without db_name to manage databases
-            temp_client = MilvusClient(
-                uri=f"{config.online_store.host}:{config.online_store.port}",
-                token=f"{config.online_store.username}:{config.online_store.password}"
-                if config.online_store.username and config.online_store.password
-                else "",
-            )
+            conn_params = self._get_connection_params(config, include_db_name=False)
+            temp_client = MilvusClient(**conn_params)
             try:
                 existing_dbs = temp_client.list_databases()
                 if db_name not in existing_dbs:
                     print(f"Creating database: {db_name}")
-                    temp_client.create_database(db_name)
+                    try:
+                        temp_client.create_database(db_name)
+                    except Exception as e:
+                        raise Exception(
+                            f"Failed to create Milvus database '{db_name}': {e}"
+                        ) from e
             finally:
                 temp_client.close()
 
