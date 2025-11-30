@@ -87,6 +87,24 @@ class MilvusOnlineStoreConfig(FeastConfigBaseModel, VectorStoreConfig):
     """
     Configuration for the Milvus online store.
     NOTE: The class *must* end with the `OnlineStoreConfig` suffix.
+
+    Attributes:
+        type: Online store type selector.
+        path: Path to the local Milvus database file (for local mode).
+        host: Milvus server host (for remote mode).
+        port: Milvus server port (for remote mode).
+        index_type: Index type for vector fields (e.g., "FLAT", "IVF_FLAT").
+        metric_type: Distance metric type (e.g., "COSINE", "L2", "IP").
+        embedding_dim: Dimension of vector embeddings.
+        vector_enabled: Whether vector search is enabled.
+        text_search_enabled: Whether text search is enabled.
+        nlist: Number of cluster units for IVF index.
+        username: Username for authentication.
+        password: Password for authentication.
+        db_name: Database name for database-level multi-tenancy.
+            When specified, all collections will be created within this database,
+            providing logical isolation for multi-tenant environments.
+            If not specified, the default database is used.
     """
 
     type: Literal["milvus"] = "milvus"
@@ -101,6 +119,7 @@ class MilvusOnlineStoreConfig(FeastConfigBaseModel, VectorStoreConfig):
     nlist: Optional[int] = 128
     username: Optional[StrictStr] = ""
     password: Optional[StrictStr] = ""
+    db_name: Optional[StrictStr] = ""
 
 
 class MilvusOnlineStore(OnlineStore):
@@ -128,21 +147,54 @@ class MilvusOnlineStore(OnlineStore):
 
     def _connect(self, config: RepoConfig) -> MilvusClient:
         if not self.client:
+            db_name = config.online_store.db_name or ""
             if config.provider == "local" and config.online_store.path:
                 db_path = self._get_db_path(config)
                 print(f"Connecting to Milvus in local mode using {db_path}")
-                self.client = MilvusClient(db_path)
+                self.client = MilvusClient(db_path, db_name=db_name)
             else:
                 print(
                     f"Connecting to Milvus remotely at {config.online_store.host}:{config.online_store.port}"
                 )
+                if db_name:
+                    print(f"Using database: {db_name}")
                 self.client = MilvusClient(
                     uri=f"{config.online_store.host}:{config.online_store.port}",
                     token=f"{config.online_store.username}:{config.online_store.password}"
                     if config.online_store.username and config.online_store.password
                     else "",
+                    db_name=db_name,
                 )
         return self.client
+
+    def _ensure_database_exists(self, config: RepoConfig) -> None:
+        """
+        Ensure the configured database exists for database-level multi-tenancy.
+        Creates the database if it doesn't already exist.
+
+        Note: This is only needed for remote Milvus instances with db_name configured.
+        Local file-based Milvus (using path) doesn't support multiple databases.
+        """
+        db_name = config.online_store.db_name
+        if not db_name:
+            return
+
+        # For remote Milvus, we need to first connect without a db_name to create the database
+        if not (config.provider == "local" and config.online_store.path):
+            # Create a temporary client without db_name to manage databases
+            temp_client = MilvusClient(
+                uri=f"{config.online_store.host}:{config.online_store.port}",
+                token=f"{config.online_store.username}:{config.online_store.password}"
+                if config.online_store.username and config.online_store.password
+                else "",
+            )
+            try:
+                existing_dbs = temp_client.list_databases()
+                if db_name not in existing_dbs:
+                    print(f"Creating database: {db_name}")
+                    temp_client.create_database(db_name)
+            finally:
+                temp_client.close()
 
     def _get_or_create_collection(
         self, config: RepoConfig, table: FeatureView
@@ -445,6 +497,8 @@ class MilvusOnlineStore(OnlineStore):
         entities_to_keep: Sequence[Entity],
         partial: bool,
     ):
+        # Ensure database exists for database-level multi-tenancy
+        self._ensure_database_exists(config)
         self.client = self._connect(config)
         for table in tables_to_keep:
             self._collections = self._get_or_create_collection(config, table)

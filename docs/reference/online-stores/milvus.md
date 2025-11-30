@@ -1,4 +1,4 @@
-# Redis online store
+# Milvus online store
 
 ## Description
 
@@ -11,9 +11,11 @@ In order to use this online store, you'll need to install the Milvus extra (alon
 
 `pip install 'feast[milvus]'`
 
-You can get started by using any of the other templates (e.g. `feast init -t gcp` or `feast init -t snowflake` or `feast init -t aws`), and then swapping in Redis as the online store as seen below in the examples.
+You can get started by using any of the other templates (e.g. `feast init -t gcp` or `feast init -t snowflake` or `feast init -t aws`), and then swapping in Milvus as the online store as seen below in the examples.
 
 ## Examples
+
+### Local mode (file-based)
 
 Connecting to a local MilvusDB instance:
 
@@ -25,7 +27,25 @@ provider: local
 online_store:
   type: milvus
   path: "data/online_store.db"
-  connection_string: "localhost:6379"
+  embedding_dim: 128
+  index_type: "FLAT"
+  metric_type: "COSINE"
+```
+{% endcode %}
+
+### Remote mode
+
+Connecting to a remote Milvus instance:
+
+{% code title="feature_store.yaml" %}
+```yaml
+project: my_feature_repo
+registry: data/registry.db
+provider: local
+online_store:
+  type: milvus
+  host: "http://localhost"
+  port: 19530
   embedding_dim: 128
   index_type: "FLAT"
   metric_type: "COSINE"
@@ -34,6 +54,49 @@ online_store:
 ```
 {% endcode %}
 
+### Multi-tenancy with database-level isolation
+
+For multi-tenant environments, you can use database-level isolation by specifying the `db_name` parameter. This creates a separate Milvus database for each tenant, providing logical isolation of collections and data:
+
+{% code title="feature_store.yaml" %}
+```yaml
+# Marketing team configuration
+project: marketing_features
+registry: data/registry.db
+provider: local
+online_store:
+  type: milvus
+  host: "http://localhost"
+  port: 19530
+  db_name: "marketing_db"
+  embedding_dim: 768
+  index_type: "IVF_FLAT"
+  metric_type: "COSINE"
+```
+{% endcode %}
+
+{% code title="feature_store.yaml" %}
+```yaml
+# Sales team configuration
+project: sales_features
+registry: data/registry.db
+provider: local
+online_store:
+  type: milvus
+  host: "http://localhost"
+  port: 19530
+  db_name: "sales_db"
+  embedding_dim: 128
+  index_type: "FLAT"
+  metric_type: "L2"
+```
+{% endcode %}
+
+With database-level multi-tenancy:
+- Each team's collections are isolated in their own database
+- Different embedding dimensions can be used per database
+- Different vector index types and metrics can be configured per team
+- Access control can be managed at the database level in Milvus
 
 The full set of configuration options is available in [MilvusOnlineStoreConfig](https://rtd.feast.dev/en/latest/#feast.infra.online_stores.milvus.MilvusOnlineStoreConfig).
 
@@ -61,5 +124,6 @@ Below is a matrix indicating which functionality is supported by the Milvus onli
 | collocated by feature service                             | no     |
 | collocated by entity key                                  | no     |
 | vector similarity search                                  | yes    |
+| database-level multi-tenancy                              | yes    |
 
 To compare this set of functionality against other online stores, please see the full [functionality matrix](overview.md#functionality-matrix).
