@@ -1726,7 +1726,7 @@ def test_milvus_graph_rag_neighbors_round_trip() -> None:
     from feast.types import Array, Float32, String, UnixTimestamp
 
     runner = CliRunner()
-    vector_length = 6
+    vector_length = 10
 
     with runner.local_repo(
         get_example_repo("example_feature_repo_1.py"),
@@ -1742,7 +1742,7 @@ def test_milvus_graph_rag_neighbors_round_trip() -> None:
         graph_source = FileSource(
             path="data/graph_entities.parquet",
             timestamp_field="event_timestamp",
-            created_timestamp_column="event_timestamp",
+            created_timestamp_column=None,
         )
 
         graph_view = FeatureView(

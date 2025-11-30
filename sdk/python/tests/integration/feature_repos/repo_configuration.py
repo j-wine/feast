@@ -27,9 +27,12 @@ from feast.infra.feature_servers.base_config import (
     FeatureLoggingConfig,
 )
 from feast.infra.feature_servers.local_process.config import LocalFeatureServerConfig
-from feast.infra.offline_stores.contrib.ray_repo_configuration import (
-    RayDataSourceCreator,
-)
+try:
+    from feast.infra.offline_stores.contrib.ray_repo_configuration import (
+        RayDataSourceCreator,
+    )
+except ModuleNotFoundError:
+    RayDataSourceCreator = None
 from feast.permissions.action import AuthzedAction
 from feast.permissions.auth_model import OidcClientAuthConfig
 from feast.permissions.permission import Permission
@@ -43,9 +46,12 @@ from tests.integration.feature_repos.integration_test_repo_config import (
 from tests.integration.feature_repos.universal.data_source_creator import (
     DataSourceCreator,
 )
-from tests.integration.feature_repos.universal.data_sources.bigquery import (
-    BigQueryDataSourceCreator,
-)
+try:
+    from tests.integration.feature_repos.universal.data_sources.bigquery import (
+        BigQueryDataSourceCreator,
+    )
+except Exception:
+    BigQueryDataSourceCreator = None
 from tests.integration.feature_repos.universal.data_sources.file import (
     DuckDBDataSourceCreator,
     DuckDBDeltaDataSourceCreator,
@@ -54,12 +60,19 @@ from tests.integration.feature_repos.universal.data_sources.file import (
     RemoteOfflineStoreDataSourceCreator,
     RemoteOfflineTlsStoreDataSourceCreator,
 )
-from tests.integration.feature_repos.universal.data_sources.redshift import (
-    RedshiftDataSourceCreator,
-)
-from tests.integration.feature_repos.universal.data_sources.snowflake import (
-    SnowflakeDataSourceCreator,
-)
+try:
+    from tests.integration.feature_repos.universal.data_sources.redshift import (
+        RedshiftDataSourceCreator,
+    )
+except Exception:
+    RedshiftDataSourceCreator = None
+
+try:
+    from tests.integration.feature_repos.universal.data_sources.snowflake import (
+        SnowflakeDataSourceCreator,
+    )
+except Exception:
+    SnowflakeDataSourceCreator = None
 from tests.integration.feature_repos.universal.feature_views import (
     conv_rate_plus_100_feature_view,
     create_conv_rate_request_source,
@@ -72,21 +85,40 @@ from tests.integration.feature_repos.universal.feature_views import (
     create_order_feature_view,
     create_pushable_feature_view,
 )
-from tests.integration.feature_repos.universal.online_store.bigtable import (
-    BigtableOnlineStoreCreator,
-)
-from tests.integration.feature_repos.universal.online_store.datastore import (
-    DatastoreOnlineStoreCreator,
-)
-from tests.integration.feature_repos.universal.online_store.dynamodb import (
-    DynamoDBOnlineStoreCreator,
-)
-from tests.integration.feature_repos.universal.online_store.milvus import (
-    MilvusOnlineStoreCreator,
-)
-from tests.integration.feature_repos.universal.online_store.redis import (
-    RedisOnlineStoreCreator,
-)
+try:
+    from tests.integration.feature_repos.universal.online_store.bigtable import (
+        BigtableOnlineStoreCreator,
+    )
+except Exception:
+    BigtableOnlineStoreCreator = None
+
+try:
+    from tests.integration.feature_repos.universal.online_store.datastore import (
+        DatastoreOnlineStoreCreator,
+    )
+except Exception:
+    DatastoreOnlineStoreCreator = None
+
+try:
+    from tests.integration.feature_repos.universal.online_store.dynamodb import (
+        DynamoDBOnlineStoreCreator,
+    )
+except Exception:
+    DynamoDBOnlineStoreCreator = None
+
+try:
+    from tests.integration.feature_repos.universal.online_store.milvus import (
+        MilvusOnlineStoreCreator,
+    )
+except Exception:
+    MilvusOnlineStoreCreator = None
+
+try:
+    from tests.integration.feature_repos.universal.online_store.redis import (
+        RedisOnlineStoreCreator,
+    )
+except Exception:
+    RedisOnlineStoreCreator = None
 from tests.integration.feature_repos.universal.online_store_creator import (
     OnlineStoreCreator,
 )
@@ -128,10 +160,14 @@ IKV_CONFIG = {
 
 OFFLINE_STORE_TO_PROVIDER_CONFIG: Dict[str, Tuple[str, Type[DataSourceCreator]]] = {
     "file": ("local", FileDataSourceCreator),
-    "bigquery": ("gcp", BigQueryDataSourceCreator),
-    "redshift": ("aws", RedshiftDataSourceCreator),
-    "snowflake": ("aws", SnowflakeDataSourceCreator),
 }
+
+if BigQueryDataSourceCreator:
+    OFFLINE_STORE_TO_PROVIDER_CONFIG["bigquery"] = ("gcp", BigQueryDataSourceCreator)
+if RedshiftDataSourceCreator:
+    OFFLINE_STORE_TO_PROVIDER_CONFIG["redshift"] = ("aws", RedshiftDataSourceCreator)
+if SnowflakeDataSourceCreator:
+    OFFLINE_STORE_TO_PROVIDER_CONFIG["snowflake"] = ("aws", SnowflakeDataSourceCreator)
 
 AVAILABLE_OFFLINE_STORES: List[Tuple[str, Type[DataSourceCreator]]] = [
     ("local", FileDataSourceCreator),
@@ -140,8 +176,10 @@ AVAILABLE_OFFLINE_STORES: List[Tuple[str, Type[DataSourceCreator]]] = [
     ("local", RemoteOfflineStoreDataSourceCreator),
     ("local", RemoteOfflineOidcAuthStoreDataSourceCreator),
     ("local", RemoteOfflineTlsStoreDataSourceCreator),
-    ("local", RayDataSourceCreator),
 ]
+
+if RayDataSourceCreator:
+    AVAILABLE_OFFLINE_STORES.append(("local", RayDataSourceCreator))
 
 if os.getenv("FEAST_IS_LOCAL_TEST", "False") == "True":
     AVAILABLE_OFFLINE_STORES.extend(
@@ -157,13 +195,14 @@ AVAILABLE_ONLINE_STORES: Dict[
 
 # Only configure Cloud DWH if running full integration tests
 if os.getenv("FEAST_IS_LOCAL_TEST", "False") != "True":
-    AVAILABLE_OFFLINE_STORES.extend(
-        [
-            ("gcp", BigQueryDataSourceCreator),
-            ("aws", RedshiftDataSourceCreator),
-            ("aws", SnowflakeDataSourceCreator),
-        ]
-    )
+    cloud_sources = []
+    if BigQueryDataSourceCreator:
+        cloud_sources.append(("gcp", BigQueryDataSourceCreator))
+    if RedshiftDataSourceCreator:
+        cloud_sources.append(("aws", RedshiftDataSourceCreator))
+    if SnowflakeDataSourceCreator:
+        cloud_sources.append(("aws", SnowflakeDataSourceCreator))
+    AVAILABLE_OFFLINE_STORES.extend(cloud_sources)
 
     AVAILABLE_ONLINE_STORES["redis"] = (REDIS_CONFIG, None)
     AVAILABLE_ONLINE_STORES["dynamodb"] = (DYNAMO_CONFIG, None)

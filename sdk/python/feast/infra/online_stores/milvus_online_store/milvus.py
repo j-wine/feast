@@ -435,16 +435,12 @@ class MilvusOnlineStore(OnlineStore):
                         )
                         feature_fv_dtype = from_feast_type(feature_feast_primitive_type)
                         if isinstance(feature_feast_primitive_type, Array):
-                            base_value_type = (
-                                feature_feast_primitive_type.base_type.to_value_type()
-                            )
+                            base_value_type = feature_feast_primitive_type.base_type.to_value_type()
                             list_proto_attr = VALUE_TYPE_TO_LIST_PROTO_ATTR.get(
                                 base_value_type
                             )
                             if list_proto_attr:
-                                getattr(val, list_proto_attr).val.extend(
-                                    field_value or []
-                                )
+                                getattr(val, list_proto_attr).val.extend(field_value or [])
                             else:
                                 raise ValueError(
                                     f"Unsupported array base type {base_value_type} for feature {field}"
@@ -563,9 +559,7 @@ class MilvusOnlineStore(OnlineStore):
         entity_name_feast_primitive_type_map = {
             k.name: k.dtype for k in table.entity_columns
         }
-        feature_name_feast_primitive_type_map = {
-            f.name: f.dtype for f in table.features
-        }
+        feature_name_feast_primitive_type_map = {f.name: f.dtype for f in table.features}
         if getattr(table, "write_to_online_store", False):
             feature_name_feast_primitive_type_map.update(
                 {f.name: f.dtype for f in table.schema}
@@ -745,10 +739,7 @@ class MilvusOnlineStore(OnlineStore):
                             res[field] = ValueProto(bytes_val=decoded_bytes)
                         except Exception:
                             res[field] = ValueProto(string_val=str(field_value))
-                    elif field_type in [
-                        PrimitiveFeastType.INT64,
-                        PrimitiveFeastType.INT32,
-                    ]:
+                    elif field_type in [PrimitiveFeastType.INT64, PrimitiveFeastType.INT32]:
                         res[field] = ValueProto(int64_val=int(field_value))
                     elif isinstance(field_type, Array):
                         base_value_type = field_type.base_type.to_value_type()
@@ -821,45 +812,35 @@ def _extract_proto_values_to_dict(
     output_dict = {}
     for feature_name, feature_values in input_dict.items():
         for proto_val_type in PROTO_VALUE_TO_VALUE_TYPE_MAP:
-            if not isinstance(feature_values, (int, float, str)):
+            if not isinstance(feature_values, (int, float, str, bytes)):
                 if feature_values.HasField(proto_val_type):
+                    proto_value = getattr(feature_values, proto_val_type)
                     if proto_val_type in numeric_vector_list_types:
                         if serialize_to_string and feature_name not in vector_cols:
-                            vector_values = getattr(
-                                feature_values, proto_val_type
-                            ).SerializeToString()
+                            vector_values = proto_value.SerializeToString()
                         else:
-                            vector_values = getattr(feature_values, proto_val_type).val
+                            vector_values = list(proto_value.val)
                     elif proto_val_type in string_vector_list_types:
-                        vector_values = list(
-                            getattr(feature_values, proto_val_type).val
-                        )
+                        vector_values = list(proto_value.val)
                     elif proto_val_type in bool_vector_list_types:
-                        vector_values = list(
-                            getattr(feature_values, proto_val_type).val
-                        )
+                        vector_values = list(proto_value.val)
+                    elif proto_val_type == "bytes_val":
+                        vector_values = base64.b64encode(proto_value).decode("utf-8")
+                    elif proto_val_type in numeric_types or proto_val_type == "string_val":
+                        vector_values = proto_value
                     else:
-                        if (
-                            serialize_to_string
-                            and proto_val_type
-                            not in ["string_val", "bytes_val"] + numeric_types
-                        ):
-                            vector_values = feature_values.SerializeToString().decode()
-                        elif proto_val_type == "bytes_val":
-                            byte_data = getattr(feature_values, proto_val_type)
-                            vector_values = base64.b64encode(byte_data).decode("utf-8")
-                        else:
-                            if not isinstance(feature_values, str):
-                                vector_values = str(
-                                    getattr(feature_values, proto_val_type)
-                                )
-                            else:
-                                vector_values = getattr(feature_values, proto_val_type)
+                        vector_values = (
+                            feature_values.SerializeToString().decode()
+                            if serialize_to_string
+                            else proto_value
+                        )
                     output_dict[feature_name] = vector_values
             else:
-                if serialize_to_string:
-                    if not isinstance(feature_values, str):
-                        feature_values = str(feature_values)
+                if serialize_to_string and isinstance(feature_values, bytes):
+                    output_dict[feature_name] = base64.b64encode(feature_values).decode(
+                        "utf-8"
+                    )
+                else:
                     output_dict[feature_name] = feature_values
 
     return output_dict

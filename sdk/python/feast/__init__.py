@@ -19,6 +19,14 @@ from .feature_service import FeatureService
 from .feature_store import FeatureStore
 from .feature_view import FeatureView
 from .field import Field
+from .graph_rag import (
+    GraphEdge,
+    GraphNode,
+    GraphPassage,
+    GraphRAGResult,
+    GraphRAGRetriever,
+    RelationCandidate,
+)
 from .on_demand_feature_view import OnDemandFeatureView
 from .project import Project
 from .repo_config import RepoConfig
@@ -45,8 +53,14 @@ __all__ = [
     "FeatureService",
     "FeatureStore",
     "FeatureView",
+    "GraphEdge",
+    "GraphNode",
+    "GraphPassage",
+    "GraphRAGResult",
+    "GraphRAGRetriever",
     "OnDemandFeatureView",
     "RepoConfig",
+    "RelationCandidate",
     "StreamFeatureView",
     "ValueType",
     "BigQuerySource",

@@ -8,6 +8,20 @@ This guide will go over:
 2. how to extend the test suite to test new functionality
 3. how to use the existing test suite to test a new custom offline / online store.
 
+## Optional dependencies for Milvus unit tests
+
+Milvus-backed unit tests (for example, the Milvus keyword search and GraphRAG round-trip cases in `tests/unit/online_store/test_online_retrieval.py`) require installing the Milvus client and local runtime dependencies. Install them before running those tests:
+
+```bash
+pip install "pymilvus==2.4.9" "milvus-lite==2.4.12" "feast[setuptools]"
+```
+
+If you already have `marshmallow` 4.x from other dependencies, pin it below version 4 to satisfy `environs`:
+
+```bash
+pip install "marshmallow<4"
+```
+
 ## Test suite overview
 
 Let's inspect the test setup in `sdk/python/tests/integration`:
