@@ -1,5 +1,6 @@
 from datetime import datetime
 from unittest.mock import MagicMock, patch
+import os
 
 import pyarrow as pa
 import pandas as pd
@@ -548,6 +549,46 @@ def test_to_arrow_uses_staging_when_enabled(monkeypatch, tmp_path):
     assert result.equals(expected_table)
 
 
+def test_to_arrow_normalizes_local_staging_paths(monkeypatch, tmp_path):
+    repo_config = RepoConfig(
+        project="test_project",
+        registry="test_registry",
+        provider="local",
+        offline_store=SparkOfflineStoreConfig(
+            type="spark",
+            staging_location=str(tmp_path / "local"),
+            staging_allow_materialize=True,
+        ),
+    )
+
+    job = SparkRetrievalJob(
+        spark_session=MagicMock(),
+        query="select 1",
+        full_feature_names=False,
+        config=repo_config,
+    )
+
+    expected_table = pa.table({"a": [1]})
+    dataset_mock = MagicMock()
+
+    raw_path = os.path.join(str(tmp_path), "staged.parquet")
+    monkeypatch.setattr(
+        job, "to_remote_storage", MagicMock(return_value=[raw_path])
+    )
+    monkeypatch.setattr(
+        spark_module.ds, "dataset", MagicMock(return_value=dataset_mock)
+    )
+    dataset_mock.to_table.return_value = expected_table
+
+    result = job._to_arrow_internal()
+
+    job.to_remote_storage.assert_called_once()
+    spark_module.ds.dataset.assert_called_once_with(
+        [f"file://{raw_path}"], format="parquet"
+    )
+    assert result.equals(expected_table)
+
+
 def test_to_arrow_falls_back_to_pandas_when_staging_disabled(monkeypatch):
     repo_config = RepoConfig(
         project="test_project",
@@ -610,3 +651,73 @@ def test_to_remote_storage_lists_with_s3_scheme(mock_list_s3_files):
     assert spark_df.write.parquet.call_args[0][0].startswith("s3a://bucket/prefix")
     assert mock_list_s3_files.call_args[0][1].startswith("s3://bucket/prefix")
     assert result == mock_list_s3_files.return_value
+
+
+@patch("feast.infra.offline_stores.contrib.spark_offline_store.spark._list_gcs_files")
+def test_to_remote_storage_lists_with_gcs_scheme(mock_list_gcs_files):
+    spark_df = MagicMock()
+    spark_df.write.parquet = MagicMock()
+    spark_session = MagicMock()
+    spark_session.sql.return_value = spark_df
+
+    mock_list_gcs_files.return_value = ["gs://bucket/prefix/file.parquet"]
+
+    repo_config = RepoConfig(
+        project="test_project",
+        registry="test_registry",
+        provider="local",
+        offline_store=SparkOfflineStoreConfig(
+            type="spark",
+            staging_location="gs://bucket/prefix",
+        ),
+    )
+
+    job = SparkRetrievalJob(
+        spark_session=spark_session,
+        query="select 1",
+        full_feature_names=False,
+        config=repo_config,
+    )
+
+    result = job.to_remote_storage()
+
+    assert spark_df.write.parquet.call_args[0][0].startswith("gs://bucket/prefix")
+    mock_list_gcs_files.assert_called_once()
+    assert result == mock_list_gcs_files.return_value
+
+
+@patch("feast.infra.offline_stores.contrib.spark_offline_store.spark._list_azure_files")
+def test_to_remote_storage_lists_with_azure_scheme(mock_list_azure_files):
+    spark_df = MagicMock()
+    spark_df.write.parquet = MagicMock()
+    spark_session = MagicMock()
+    spark_session.sql.return_value = spark_df
+
+    mock_list_azure_files.return_value = [
+        "wasbs://container@account.blob.core.windows.net/path/file.parquet"
+    ]
+
+    repo_config = RepoConfig(
+        project="test_project",
+        registry="test_registry",
+        provider="local",
+        offline_store=SparkOfflineStoreConfig(
+            type="spark",
+            staging_location="wasbs://container@account.blob.core.windows.net/path",
+        ),
+    )
+
+    job = SparkRetrievalJob(
+        spark_session=spark_session,
+        query="select 1",
+        full_feature_names=False,
+        config=repo_config,
+    )
+
+    result = job.to_remote_storage()
+
+    assert spark_df.write.parquet.call_args[0][0].startswith(
+        "wasbs://container@account.blob.core.windows.net/path"
+    )
+    mock_list_azure_files.assert_called_once()
+    assert result == mock_list_azure_files.return_value
