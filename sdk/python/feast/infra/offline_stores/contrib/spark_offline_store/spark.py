@@ -23,9 +23,10 @@ import numpy as np
 import pandas
 import pandas as pd
 import pyarrow
+import pyarrow.dataset as ds
 import pyarrow.parquet as pq
 import pyspark
-from pydantic import StrictStr
+from pydantic import StrictBool, StrictStr
 from pyspark import SparkConf
 from pyspark.sql import SparkSession
 
@@ -64,6 +65,9 @@ class SparkOfflineStoreConfig(FeastConfigBaseModel):
 
     staging_location: Optional[StrictStr] = None
     """ Remote path for batch materialization jobs"""
+
+    staging_allow_materialize: StrictBool = False
+    """ Enable use of staging_location during materialization to avoid driver OOM """
 
     region: Optional[StrictStr] = None
     """ AWS Region if applicable for s3-based staging locations"""
@@ -401,7 +405,26 @@ class SparkRetrievalJob(RetrievalJob):
 
     def _to_arrow_internal(self, timeout: Optional[int] = None) -> pyarrow.Table:
         """Return dataset as pyarrow Table synchronously"""
+        if self._should_use_staging_for_arrow():
+            return self._to_arrow_via_staging()
+
         return pyarrow.Table.from_pandas(self._to_df_internal(timeout=timeout))
+
+    def _should_use_staging_for_arrow(self) -> bool:
+        offline_store = getattr(self._config, "offline_store", None)
+        return bool(
+            isinstance(offline_store, SparkOfflineStoreConfig)
+            and getattr(offline_store, "staging_allow_materialize", False)
+            and getattr(offline_store, "staging_location", None)
+        )
+
+    def _to_arrow_via_staging(self) -> pyarrow.Table:
+        paths = self.to_remote_storage()
+        if not paths:
+            return pyarrow.table({})
+
+        dataset = ds.dataset(paths, format="parquet")
+        return dataset.to_table()
 
     def to_feast_df(
         self,
@@ -494,8 +517,9 @@ class SparkRetrievalJob(RetrievalJob):
                 )
                 sdf.write.parquet(output_uri)
 
+                s3_uri_for_listing = output_uri.replace("s3a://", "s3://", 1)
                 return aws_utils.list_s3_files(
-                    self._config.offline_store.region, output_uri
+                    self._config.offline_store.region, s3_uri_for_listing
                 )
             elif self._config.offline_store.staging_location.startswith("hdfs://"):
                 output_uri = os.path.join(
