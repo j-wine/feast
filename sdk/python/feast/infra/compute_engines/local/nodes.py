@@ -263,32 +263,45 @@ class LocalOutputNode(LocalNode):
         if input_table.num_rows == 0:
             return input_table
 
-        if self.feature_view.online:
-            online_store = context.online_store
+        chunk_size = getattr(
+            getattr(context.repo_config, "batch_engine", None), "chunk_size", None
+        )
+        if chunk_size and chunk_size > 0:
+            batches = input_table.to_batches(max_chunksize=chunk_size)
+        else:
+            batches = [input_table]
 
-            join_key_to_value_type = {
-                entity.name: entity.dtype.to_value_type()
-                for entity in self.feature_view.entity_columns
-            }
-
-            rows_to_write = _convert_arrow_to_proto(
-                input_table, self.feature_view, join_key_to_value_type
+        for batch in batches:
+            batch_table = (
+                batch if isinstance(batch, pa.Table) else pa.Table.from_batches([batch])
             )
 
-            online_store.online_write_batch(
-                config=context.repo_config,
-                table=self.feature_view,
-                data=rows_to_write,
-                progress=lambda x: None,
-            )
+            if self.feature_view.online:
+                online_store = context.online_store
 
-        if self.feature_view.offline:
-            offline_store = context.offline_store
-            offline_store.offline_write_batch(
-                config=context.repo_config,
-                feature_view=self.feature_view,
-                table=input_table,
-                progress=lambda x: None,
-            )
+                join_key_to_value_type = {
+                    entity.name: entity.dtype.to_value_type()
+                    for entity in self.feature_view.entity_columns
+                }
+
+                rows_to_write = _convert_arrow_to_proto(
+                    batch_table, self.feature_view, join_key_to_value_type
+                )
+
+                online_store.online_write_batch(
+                    config=context.repo_config,
+                    table=self.feature_view,
+                    data=rows_to_write,
+                    progress=lambda x: None,
+                )
+
+            if self.feature_view.offline:
+                offline_store = context.offline_store
+                offline_store.offline_write_batch(
+                    config=context.repo_config,
+                    feature_view=self.feature_view,
+                    table=batch_table,
+                    progress=lambda x: None,
+                )
 
         return input_table

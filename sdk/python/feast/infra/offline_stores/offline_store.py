@@ -217,6 +217,19 @@ class RetrievalJob(ABC):
                 tensor_dict[column] = values
         return tensor_dict
 
+    def to_arrow_batches(
+        self, batch_size: Optional[int] = None, timeout: Optional[int] = None
+    ):
+        """
+        Stream results as an iterator of Arrow RecordBatches.
+
+        Args:
+            batch_size: Optional size hint for RecordBatches.
+            timeout: Optional timeout for query execution.
+        """
+        table = self.to_arrow(timeout=timeout)
+        yield from table.to_batches(max_chunksize=batch_size)
+
     def to_sql(self) -> str:
         """
         Return RetrievalJob generated SQL statement if applicable.

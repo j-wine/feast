@@ -34,6 +34,9 @@ class LocalComputeEngineConfig(FeastConfigBaseModel):
     backend: Optional[str] = None
     """Backend to use for DataFrame operations (e.g., 'pandas', 'polars')"""
 
+    chunk_size: Optional[int] = None
+    """Optional chunk size for batch processing; if set, LocalOutputNode will write in chunks."""
+
 
 class LocalComputeEngine(ComputeEngine):
     def update(
@@ -58,10 +61,11 @@ class LocalComputeEngine(ComputeEngine):
     ):
         pass
 
-    def __init__(self, backend: Optional[str] = None, **kwargs):
+    def __init__(self, backend: Optional[str] = None, chunk_size: Optional[int] = None, **kwargs):
         super().__init__(**kwargs)
         self.backend_name = backend
         self._backend = BackendFactory.from_name(backend) if backend else None
+        self.chunk_size = chunk_size
 
     def _get_backend(self, context: ExecutionContext) -> DataFrameBackend:
         if self._backend:
