@@ -1081,7 +1081,10 @@ class FeatureStore:
         # Behavior by cache_mode:
         # - sync mode: Immediate consistency - refresh after apply
         # - thread mode: Eventual consistency - skip refresh, background thread handles it
-        if self.config.registry.cache_mode == "sync":
+        if (
+            self.config.registry.cache_enabled
+            and self.config.registry.cache_mode == "sync"
+        ):
             self.refresh_registry()
 
     def teardown(self):

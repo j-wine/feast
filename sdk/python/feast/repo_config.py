@@ -152,6 +152,10 @@ class RegistryConfig(FeastBaseModel):
      set to infinity by setting TTL to 0 seconds, which means the cache will only be loaded once and will never
      expire. Users can manually refresh the cache by calling feature_store.refresh_registry() """
 
+    cache_enabled: StrictBool = True
+    """bool: Whether to use the registry cache at all. When set to False, registry state is fetched directly from
+    the registry store on each access and the registry cache is not initialized at startup."""
+
     cache_mode: StrictStr = "sync"
     """str: Cache mode type. Possible options are 'sync' (immediate refresh after each write operation) and
      'thread' (asynchronous background refresh at cache_ttl_seconds intervals). In 'sync' mode, registry changes

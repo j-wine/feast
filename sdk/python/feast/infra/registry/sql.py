@@ -270,6 +270,7 @@ class SqlRegistry(CachingRegistry):
             project=project,
             cache_ttl_seconds=registry_config.cache_ttl_seconds,
             cache_mode=registry_config.cache_mode,
+            cache_enabled=registry_config.cache_enabled,
         )
         # Sync feast_metadata to projects table
         # when purge_feast_metadata is set to True, Delete data from
