@@ -44,7 +44,11 @@ if registry_store_class == FileRegistryStore and not os.path.exists(registry_pat
 # Initialize the feature store
 store = FeatureStore(repo_path=str(repo_path.resolve()))
 
-if isinstance(registry, dict) and registry.get("cache_ttl_seconds", 0) > 0:
+if (
+    isinstance(registry, dict)
+    and registry.get("cache_enabled", True)
+    and registry.get("cache_ttl_seconds", 0) > 0
+):
     # disable synchronous refresh
     store.config.registry.cache_ttl_seconds = 0
 

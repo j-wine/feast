@@ -79,12 +79,16 @@ class RemoteRegistry(BaseRegistry):
     ):
         self.auth_config = auth_config
         assert isinstance(registry_config, RemoteRegistryConfig)
+        self.cache_enabled = registry_config.cache_enabled
         self.channel = self._create_grpc_channel(registry_config)
         weakref.finalize(self, self.channel.close)
 
         auth_header_interceptor = GrpcClientAuthHeaderInterceptor(auth_config)
         self.channel = grpc.intercept_channel(self.channel, auth_header_interceptor)
         self.stub = RegistryServer_pb2_grpc.RegistryServerStub(self.channel)
+
+    def _allow_cache(self, allow_cache: bool) -> bool:
+        return self.cache_enabled and allow_cache
 
     def _create_grpc_channel(self, registry_config):
         assert isinstance(registry_config, RemoteRegistryConfig)
@@ -124,7 +128,7 @@ class RemoteRegistry(BaseRegistry):
 
     def get_entity(self, name: str, project: str, allow_cache: bool = False) -> Entity:
         request = RegistryServer_pb2.GetEntityRequest(
-            name=name, project=project, allow_cache=allow_cache
+            name=name, project=project, allow_cache=self._allow_cache(allow_cache)
         )
         response = self.stub.GetEntity(request)
         return Entity.from_proto(response)
@@ -136,7 +140,7 @@ class RemoteRegistry(BaseRegistry):
         tags: Optional[dict[str, str]] = None,
     ) -> List[Entity]:
         request = RegistryServer_pb2.ListEntitiesRequest(
-            project=project, allow_cache=allow_cache, tags=tags
+            project=project, allow_cache=self._allow_cache(allow_cache), tags=tags
         )
         response = self.stub.ListEntities(request)
         return [Entity.from_proto(entity) for entity in response.entities]
@@ -159,7 +163,7 @@ class RemoteRegistry(BaseRegistry):
         self, name: str, project: str, allow_cache: bool = False
     ) -> DataSource:
         request = RegistryServer_pb2.GetDataSourceRequest(
-            name=name, project=project, allow_cache=allow_cache
+            name=name, project=project, allow_cache=self._allow_cache(allow_cache)
         )
         response = self.stub.GetDataSource(request)
         return DataSource.from_proto(response)
@@ -171,7 +175,7 @@ class RemoteRegistry(BaseRegistry):
         tags: Optional[dict[str, str]] = None,
     ) -> List[DataSource]:
         request = RegistryServer_pb2.ListDataSourcesRequest(
-            project=project, allow_cache=allow_cache, tags=tags
+            project=project, allow_cache=self._allow_cache(allow_cache), tags=tags
         )
         response = self.stub.ListDataSources(request)
         return [
@@ -196,7 +200,7 @@ class RemoteRegistry(BaseRegistry):
         self, name: str, project: str, allow_cache: bool = False
     ) -> FeatureService:
         request = RegistryServer_pb2.GetFeatureServiceRequest(
-            name=name, project=project, allow_cache=allow_cache
+            name=name, project=project, allow_cache=self._allow_cache(allow_cache)
         )
         response = self.stub.GetFeatureService(request)
         return FeatureService.from_proto(response)
@@ -208,7 +212,7 @@ class RemoteRegistry(BaseRegistry):
         tags: Optional[dict[str, str]] = None,
     ) -> List[FeatureService]:
         request = RegistryServer_pb2.ListFeatureServicesRequest(
-            project=project, allow_cache=allow_cache, tags=tags
+            project=project, allow_cache=self._allow_cache(allow_cache), tags=tags
         )
         response = self.stub.ListFeatureServices(request)
         return [
@@ -254,7 +258,7 @@ class RemoteRegistry(BaseRegistry):
         self, name: str, project: str, allow_cache: bool = False
     ) -> StreamFeatureView:
         request = RegistryServer_pb2.GetStreamFeatureViewRequest(
-            name=name, project=project, allow_cache=allow_cache
+            name=name, project=project, allow_cache=self._allow_cache(allow_cache)
         )
         response = self.stub.GetStreamFeatureView(request)
         return StreamFeatureView.from_proto(response)
@@ -266,7 +270,7 @@ class RemoteRegistry(BaseRegistry):
         tags: Optional[dict[str, str]] = None,
     ) -> List[StreamFeatureView]:
         request = RegistryServer_pb2.ListStreamFeatureViewsRequest(
-            project=project, allow_cache=allow_cache, tags=tags
+            project=project, allow_cache=self._allow_cache(allow_cache), tags=tags
         )
         response = self.stub.ListStreamFeatureViews(request)
         return [
@@ -278,7 +282,7 @@ class RemoteRegistry(BaseRegistry):
         self, name: str, project: str, allow_cache: bool = False
     ) -> OnDemandFeatureView:
         request = RegistryServer_pb2.GetOnDemandFeatureViewRequest(
-            name=name, project=project, allow_cache=allow_cache
+            name=name, project=project, allow_cache=self._allow_cache(allow_cache)
         )
         response = self.stub.GetOnDemandFeatureView(request)
         return OnDemandFeatureView.from_proto(response)
@@ -290,7 +294,7 @@ class RemoteRegistry(BaseRegistry):
         tags: Optional[dict[str, str]] = None,
     ) -> List[OnDemandFeatureView]:
         request = RegistryServer_pb2.ListOnDemandFeatureViewsRequest(
-            project=project, allow_cache=allow_cache, tags=tags
+            project=project, allow_cache=self._allow_cache(allow_cache), tags=tags
         )
         response = self.stub.ListOnDemandFeatureViews(request)
         return [
@@ -302,7 +306,7 @@ class RemoteRegistry(BaseRegistry):
         self, name: str, project: str, allow_cache: bool = False
     ) -> BaseFeatureView:
         request = RegistryServer_pb2.GetAnyFeatureViewRequest(
-            name=name, project=project, allow_cache=allow_cache
+            name=name, project=project, allow_cache=self._allow_cache(allow_cache)
         )
 
         response: RegistryServer_pb2.GetAnyFeatureViewResponse = (
@@ -318,7 +322,7 @@ class RemoteRegistry(BaseRegistry):
         tags: Optional[dict[str, str]] = None,
     ) -> List[BaseFeatureView]:
         request = RegistryServer_pb2.ListAllFeatureViewsRequest(
-            project=project, allow_cache=allow_cache, tags=tags
+            project=project, allow_cache=self._allow_cache(allow_cache), tags=tags
         )
 
         response: RegistryServer_pb2.ListAllFeatureViewsResponse = (
@@ -333,7 +337,7 @@ class RemoteRegistry(BaseRegistry):
         self, name: str, project: str, allow_cache: bool = False
     ) -> FeatureView:
         request = RegistryServer_pb2.GetFeatureViewRequest(
-            name=name, project=project, allow_cache=allow_cache
+            name=name, project=project, allow_cache=self._allow_cache(allow_cache)
         )
         response = self.stub.GetFeatureView(request)
         return FeatureView.from_proto(response)
@@ -345,7 +349,7 @@ class RemoteRegistry(BaseRegistry):
         tags: Optional[dict[str, str]] = None,
     ) -> List[FeatureView]:
         request = RegistryServer_pb2.ListFeatureViewsRequest(
-            project=project, allow_cache=allow_cache, tags=tags
+            project=project, allow_cache=self._allow_cache(allow_cache), tags=tags
         )
         response = self.stub.ListFeatureViews(request)
 
@@ -398,7 +402,7 @@ class RemoteRegistry(BaseRegistry):
         self, name: str, project: str, allow_cache: bool = False
     ) -> SavedDataset:
         request = RegistryServer_pb2.GetSavedDatasetRequest(
-            name=name, project=project, allow_cache=allow_cache
+            name=name, project=project, allow_cache=self._allow_cache(allow_cache)
         )
         response = self.stub.GetSavedDataset(request)
         return SavedDataset.from_proto(response)
@@ -410,7 +414,7 @@ class RemoteRegistry(BaseRegistry):
         tags: Optional[dict[str, str]] = None,
     ) -> List[SavedDataset]:
         request = RegistryServer_pb2.ListSavedDatasetsRequest(
-            project=project, allow_cache=allow_cache, tags=tags
+            project=project, allow_cache=self._allow_cache(allow_cache), tags=tags
         )
         response = self.stub.ListSavedDatasets(request)
         return [
@@ -441,7 +445,7 @@ class RemoteRegistry(BaseRegistry):
         self, name: str, project: str, allow_cache: bool = False
     ) -> ValidationReference:
         request = RegistryServer_pb2.GetValidationReferenceRequest(
-            name=name, project=project, allow_cache=allow_cache
+            name=name, project=project, allow_cache=self._allow_cache(allow_cache)
         )
         response = self.stub.GetValidationReference(request)
         return ValidationReference.from_proto(response)
@@ -453,7 +457,7 @@ class RemoteRegistry(BaseRegistry):
         tags: Optional[dict[str, str]] = None,
     ) -> List[ValidationReference]:
         request = RegistryServer_pb2.ListValidationReferencesRequest(
-            project=project, allow_cache=allow_cache, tags=tags
+            project=project, allow_cache=self._allow_cache(allow_cache), tags=tags
         )
         response = self.stub.ListValidationReferences(request)
         return [
@@ -465,7 +469,7 @@ class RemoteRegistry(BaseRegistry):
         self, project: str, allow_cache: bool = False
     ) -> List[ProjectMetadata]:
         request = RegistryServer_pb2.ListProjectMetadataRequest(
-            project=project, allow_cache=allow_cache
+            project=project, allow_cache=self._allow_cache(allow_cache)
         )
         response = self.stub.ListProjectMetadata(request)
         return [ProjectMetadata.from_proto(pm) for pm in response.project_metadata]
@@ -478,7 +482,7 @@ class RemoteRegistry(BaseRegistry):
 
     def get_infra(self, project: str, allow_cache: bool = False) -> Infra:
         request = RegistryServer_pb2.GetInfraRequest(
-            project=project, allow_cache=allow_cache
+            project=project, allow_cache=self._allow_cache(allow_cache)
         )
         response = self.stub.GetInfra(request)
         return Infra.from_proto(response)
@@ -517,7 +521,7 @@ class RemoteRegistry(BaseRegistry):
         self, name: str, project: str, allow_cache: bool = False
     ) -> Permission:
         request = RegistryServer_pb2.GetPermissionRequest(
-            name=name, project=project, allow_cache=allow_cache
+            name=name, project=project, allow_cache=self._allow_cache(allow_cache)
         )
         response = self.stub.GetPermission(request)
 
@@ -530,7 +534,7 @@ class RemoteRegistry(BaseRegistry):
         tags: Optional[dict[str, str]] = None,
     ) -> List[Permission]:
         request = RegistryServer_pb2.ListPermissionsRequest(
-            project=project, allow_cache=allow_cache, tags=tags
+            project=project, allow_cache=self._allow_cache(allow_cache), tags=tags
         )
         response = self.stub.ListPermissions(request)
         return [
@@ -563,7 +567,7 @@ class RemoteRegistry(BaseRegistry):
         allow_cache: bool = False,
     ) -> Project:
         request = RegistryServer_pb2.GetProjectRequest(
-            name=name, allow_cache=allow_cache
+            name=name, allow_cache=self._allow_cache(allow_cache)
         )
         response = self.stub.GetProject(request)
 
@@ -575,7 +579,7 @@ class RemoteRegistry(BaseRegistry):
         tags: Optional[dict[str, str]] = None,
     ) -> List[Project]:
         request = RegistryServer_pb2.ListProjectsRequest(
-            allow_cache=allow_cache, tags=tags
+            allow_cache=self._allow_cache(allow_cache), tags=tags
         )
         response = self.stub.ListProjects(request)
         return [Project.from_proto(project) for project in response.projects]
@@ -615,7 +619,7 @@ class RemoteRegistry(BaseRegistry):
         """Get complete registry lineage via remote registry server."""
         request = RegistryServer_pb2.GetRegistryLineageRequest(
             project=project,
-            allow_cache=allow_cache,
+            allow_cache=self._allow_cache(allow_cache),
             filter_object_type=filter_object_type or "",
             filter_object_name=filter_object_name or "",
         )
@@ -670,7 +674,7 @@ class RemoteRegistry(BaseRegistry):
             object_type=object_type,
             object_name=object_name,
             include_indirect=include_indirect,
-            allow_cache=allow_cache,
+            allow_cache=self._allow_cache(allow_cache),
         )
         response = self.stub.GetObjectRelationships(request)
 

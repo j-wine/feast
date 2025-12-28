@@ -224,6 +224,9 @@ class Registry(BaseRegistry):
         self.cache_mode = (
             registry_config.cache_mode if registry_config is not None else "sync"
         )
+        self.cache_enabled = (
+            registry_config.cache_enabled if registry_config is not None else True
+        )
 
         self._file_mtime = None
         self._file_path = None
@@ -252,17 +255,18 @@ class Registry(BaseRegistry):
                 if self._file_path.exists():
                     self._file_mtime = self._file_path.stat().st_mtime
 
-            try:
-                registry_proto = self._registry_store.get_registry_proto()
-                self.cached_registry_proto = registry_proto
-                self.cached_registry_proto_created = _utc_now()
-                # Sync feast_metadata to projects table
-                # when purge_feast_metadata is set to True, Delete data from
-                # feast_metadata table and list_project_metadata will not return any data
-                self._sync_feast_metadata_to_projects_table()
-            except FileNotFoundError:
-                logger.info("Registry file not found. Creating new registry.")
-                self.commit()
+            if self.cache_enabled:
+                try:
+                    registry_proto = self._registry_store.get_registry_proto()
+                    self.cached_registry_proto = registry_proto
+                    self.cached_registry_proto_created = _utc_now()
+                    # Sync feast_metadata to projects table
+                    # when purge_feast_metadata is set to True, Delete data from
+                    # feast_metadata table and list_project_metadata will not return any data
+                    self._sync_feast_metadata_to_projects_table()
+                except FileNotFoundError:
+                    logger.info("Registry file not found. Creating new registry.")
+                    self.commit()
 
     def _sync_feast_metadata_to_projects_table(self):
         """
@@ -919,6 +923,32 @@ class Registry(BaseRegistry):
 
         assert self.cached_registry_proto is not None
 
+        if not self.cache_enabled:
+            try:
+                registry_proto = self._registry_store.get_registry_proto()
+                self.cached_registry_proto = registry_proto
+                self.cached_registry_proto_created = _utc_now()
+            except FileNotFoundError:
+                logger.info("Registry file not found. Creating new registry.")
+                self.commit()
+            try:
+                proto_registry_utils.get_project(
+                    self.cached_registry_proto, project_name
+                )
+                return self.cached_registry_proto
+            except ProjectObjectNotFoundException:
+                project_proto = Project(name=project_name).to_proto()
+                self.cached_registry_proto.projects.append(project_proto)
+                if not self.purge_feast_metadata:
+                    project_metadata_proto = ProjectMetadata(
+                        project_name=project_name
+                    ).to_proto()
+                    self.cached_registry_proto.project_metadata.append(
+                        project_metadata_proto
+                    )
+                self.commit()
+                return self.cached_registry_proto
+
         try:
             # Check if the project exists in the registry cache
             self.get_project(name=project_name, allow_cache=True)
@@ -958,6 +988,14 @@ class Registry(BaseRegistry):
         Returns: Returns a RegistryProto object which represents the state of the registry
         """
         with self._refresh_lock:
+            if not self.cache_enabled:
+                try:
+                    return self._registry_store.get_registry_proto()
+                except FileNotFoundError:
+                    logger.info("Registry file not found. Creating new registry.")
+                    self.commit()
+                    return self.cached_registry_proto
+
             # For file-based registries in sync mode, check file modification time
             # to detect changes immediately, not just based on TTL
             file_modified = False

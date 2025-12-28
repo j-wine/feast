@@ -28,18 +28,30 @@ logger = logging.getLogger(__name__)
 
 
 class CachingRegistry(BaseRegistry):
-    def __init__(self, project: str, cache_ttl_seconds: int, cache_mode: str):
+    def __init__(
+        self,
+        project: str,
+        cache_ttl_seconds: int,
+        cache_mode: str,
+        cache_enabled: bool = True,
+    ):
         self.cache_mode = cache_mode
+        self.cache_enabled = cache_enabled
         self.cached_registry_proto = RegistryProto()
         self._refresh_lock = Lock()
         self.cached_registry_proto_ttl = timedelta(
             seconds=cache_ttl_seconds if cache_ttl_seconds is not None else 0
         )
-        self.cached_registry_proto = self.proto()
         self.cached_registry_proto_created = _utc_now()
-        if cache_mode == "thread":
-            self._start_thread_async_refresh(cache_ttl_seconds)
-            atexit.register(self._exit_handler)
+        if self.cache_enabled:
+            self.cached_registry_proto = self.proto()
+            self.cached_registry_proto_created = _utc_now()
+            if cache_mode == "thread":
+                self._start_thread_async_refresh(cache_ttl_seconds)
+                atexit.register(self._exit_handler)
+
+    def _should_use_cache(self, allow_cache: bool) -> bool:
+        return self.cache_enabled and allow_cache
 
     @abstractmethod
     def _get_data_source(self, name: str, project: str) -> DataSource:
@@ -48,7 +60,7 @@ class CachingRegistry(BaseRegistry):
     def get_data_source(
         self, name: str, project: str, allow_cache: bool = False
     ) -> DataSource:
-        if allow_cache:
+        if self._should_use_cache(allow_cache):
             self._refresh_cached_registry_if_necessary()
             return proto_registry_utils.get_data_source(
                 self.cached_registry_proto, name, project
@@ -67,7 +79,7 @@ class CachingRegistry(BaseRegistry):
         allow_cache: bool = False,
         tags: Optional[dict[str, str]] = None,
     ) -> List[DataSource]:
-        if allow_cache:
+        if self._should_use_cache(allow_cache):
             self._refresh_cached_registry_if_necessary()
             return proto_registry_utils.list_data_sources(
                 self.cached_registry_proto, project, tags
@@ -79,7 +91,7 @@ class CachingRegistry(BaseRegistry):
         pass
 
     def get_entity(self, name: str, project: str, allow_cache: bool = False) -> Entity:
-        if allow_cache:
+        if self._should_use_cache(allow_cache):
             self._refresh_cached_registry_if_necessary()
             return proto_registry_utils.get_entity(
                 self.cached_registry_proto, name, project
@@ -98,7 +110,7 @@ class CachingRegistry(BaseRegistry):
         allow_cache: bool = False,
         tags: Optional[dict[str, str]] = None,
     ) -> List[Entity]:
-        if allow_cache:
+        if self._should_use_cache(allow_cache):
             self._refresh_cached_registry_if_necessary()
             return proto_registry_utils.list_entities(
                 self.cached_registry_proto, project, tags
@@ -112,7 +124,7 @@ class CachingRegistry(BaseRegistry):
     def get_any_feature_view(
         self, name: str, project: str, allow_cache: bool = False
     ) -> BaseFeatureView:
-        if allow_cache:
+        if self._should_use_cache(allow_cache):
             self._refresh_cached_registry_if_necessary()
             return proto_registry_utils.get_any_feature_view(
                 self.cached_registry_proto, name, project
@@ -131,7 +143,7 @@ class CachingRegistry(BaseRegistry):
         allow_cache: bool = False,
         tags: Optional[dict[str, str]] = None,
     ) -> List[BaseFeatureView]:
-        if allow_cache:
+        if self._should_use_cache(allow_cache):
             self._refresh_cached_registry_if_necessary()
             return proto_registry_utils.list_all_feature_views(
                 self.cached_registry_proto, project, tags
@@ -145,7 +157,7 @@ class CachingRegistry(BaseRegistry):
     def get_feature_view(
         self, name: str, project: str, allow_cache: bool = False
     ) -> FeatureView:
-        if allow_cache:
+        if self._should_use_cache(allow_cache):
             self._refresh_cached_registry_if_necessary()
             return proto_registry_utils.get_feature_view(
                 self.cached_registry_proto, name, project
@@ -164,7 +176,7 @@ class CachingRegistry(BaseRegistry):
         allow_cache: bool = False,
         tags: Optional[dict[str, str]] = None,
     ) -> List[FeatureView]:
-        if allow_cache:
+        if self._should_use_cache(allow_cache):
             self._refresh_cached_registry_if_necessary()
             return proto_registry_utils.list_feature_views(
                 self.cached_registry_proto, project, tags
@@ -180,7 +192,7 @@ class CachingRegistry(BaseRegistry):
     def get_on_demand_feature_view(
         self, name: str, project: str, allow_cache: bool = False
     ) -> OnDemandFeatureView:
-        if allow_cache:
+        if self._should_use_cache(allow_cache):
             self._refresh_cached_registry_if_necessary()
             return proto_registry_utils.get_on_demand_feature_view(
                 self.cached_registry_proto, name, project
@@ -199,7 +211,7 @@ class CachingRegistry(BaseRegistry):
         allow_cache: bool = False,
         tags: Optional[dict[str, str]] = None,
     ) -> List[OnDemandFeatureView]:
-        if allow_cache:
+        if self._should_use_cache(allow_cache):
             self._refresh_cached_registry_if_necessary()
             return proto_registry_utils.list_on_demand_feature_views(
                 self.cached_registry_proto, project, tags
@@ -213,7 +225,7 @@ class CachingRegistry(BaseRegistry):
     def get_stream_feature_view(
         self, name: str, project: str, allow_cache: bool = False
     ) -> StreamFeatureView:
-        if allow_cache:
+        if self._should_use_cache(allow_cache):
             self._refresh_cached_registry_if_necessary()
             return proto_registry_utils.get_stream_feature_view(
                 self.cached_registry_proto, name, project
@@ -232,7 +244,7 @@ class CachingRegistry(BaseRegistry):
         allow_cache: bool = False,
         tags: Optional[dict[str, str]] = None,
     ) -> List[StreamFeatureView]:
-        if allow_cache:
+        if self._should_use_cache(allow_cache):
             self._refresh_cached_registry_if_necessary()
             return proto_registry_utils.list_stream_feature_views(
                 self.cached_registry_proto, project, tags
@@ -246,7 +258,7 @@ class CachingRegistry(BaseRegistry):
     def get_feature_service(
         self, name: str, project: str, allow_cache: bool = False
     ) -> FeatureService:
-        if allow_cache:
+        if self._should_use_cache(allow_cache):
             self._refresh_cached_registry_if_necessary()
             return proto_registry_utils.get_feature_service(
                 self.cached_registry_proto, name, project
@@ -265,7 +277,7 @@ class CachingRegistry(BaseRegistry):
         allow_cache: bool = False,
         tags: Optional[dict[str, str]] = None,
     ) -> List[FeatureService]:
-        if allow_cache:
+        if self._should_use_cache(allow_cache):
             self._refresh_cached_registry_if_necessary()
             return proto_registry_utils.list_feature_services(
                 self.cached_registry_proto, project, tags
@@ -279,7 +291,7 @@ class CachingRegistry(BaseRegistry):
     def get_saved_dataset(
         self, name: str, project: str, allow_cache: bool = False
     ) -> SavedDataset:
-        if allow_cache:
+        if self._should_use_cache(allow_cache):
             self._refresh_cached_registry_if_necessary()
             return proto_registry_utils.get_saved_dataset(
                 self.cached_registry_proto, name, project
@@ -298,7 +310,7 @@ class CachingRegistry(BaseRegistry):
         allow_cache: bool = False,
         tags: Optional[dict[str, str]] = None,
     ) -> List[SavedDataset]:
-        if allow_cache:
+        if self._should_use_cache(allow_cache):
             self._refresh_cached_registry_if_necessary()
             return proto_registry_utils.list_saved_datasets(
                 self.cached_registry_proto, project, tags
@@ -312,7 +324,7 @@ class CachingRegistry(BaseRegistry):
     def get_validation_reference(
         self, name: str, project: str, allow_cache: bool = False
     ) -> ValidationReference:
-        if allow_cache:
+        if self._should_use_cache(allow_cache):
             self._refresh_cached_registry_if_necessary()
             return proto_registry_utils.get_validation_reference(
                 self.cached_registry_proto, name, project
@@ -331,7 +343,7 @@ class CachingRegistry(BaseRegistry):
         allow_cache: bool = False,
         tags: Optional[dict[str, str]] = None,
     ) -> List[ValidationReference]:
-        if allow_cache:
+        if self._should_use_cache(allow_cache):
             self._refresh_cached_registry_if_necessary()
             return proto_registry_utils.list_validation_references(
                 self.cached_registry_proto, project, tags
@@ -349,7 +361,7 @@ class CachingRegistry(BaseRegistry):
             "list_project_metadata is deprecated and will be removed in a future version. Use list_projects() and get_project() methods instead.",
             DeprecationWarning,
         )
-        if allow_cache:
+        if self._should_use_cache(allow_cache):
             self._refresh_cached_registry_if_necessary()
             return proto_registry_utils.list_project_metadata(
                 self.cached_registry_proto, project
@@ -370,7 +382,7 @@ class CachingRegistry(BaseRegistry):
     def get_permission(
         self, name: str, project: str, allow_cache: bool = False
     ) -> Permission:
-        if allow_cache:
+        if self._should_use_cache(allow_cache):
             self._refresh_cached_registry_if_necessary()
             return proto_registry_utils.get_permission(
                 self.cached_registry_proto, name, project
@@ -389,7 +401,7 @@ class CachingRegistry(BaseRegistry):
         allow_cache: bool = False,
         tags: Optional[dict[str, str]] = None,
     ) -> List[Permission]:
-        if allow_cache:
+        if self._should_use_cache(allow_cache):
             self._refresh_cached_registry_if_necessary()
             return proto_registry_utils.list_permissions(
                 self.cached_registry_proto, project, tags
@@ -405,7 +417,7 @@ class CachingRegistry(BaseRegistry):
         name: str,
         allow_cache: bool = False,
     ) -> Project:
-        if allow_cache:
+        if self._should_use_cache(allow_cache):
             self._refresh_cached_registry_if_necessary()
             return proto_registry_utils.get_project(self.cached_registry_proto, name)
         return self._get_project(name)
@@ -419,7 +431,7 @@ class CachingRegistry(BaseRegistry):
         allow_cache: bool = False,
         tags: Optional[dict[str, str]] = None,
     ) -> List[Project]:
-        if allow_cache:
+        if self._should_use_cache(allow_cache):
             self._refresh_cached_registry_if_necessary()
             return proto_registry_utils.list_projects(self.cached_registry_proto, tags)
         return self._list_projects(tags)
@@ -432,6 +444,8 @@ class CachingRegistry(BaseRegistry):
             logger.debug(f"Error while refreshing registry: {e}", exc_info=True)
 
     def _refresh_cached_registry_if_necessary(self):
+        if not self.cache_enabled:
+            return
         if self.cache_mode == "sync":
 
             def is_cache_expired():
