@@ -544,7 +544,7 @@ def test_to_arrow_uses_staging_when_enabled(monkeypatch, tmp_path):
 
     job.to_remote_storage.assert_called_once()
     spark_module.ds.dataset.assert_called_once_with(
-        ["file:///test.parquet"], format="parquet"
+        ["/test.parquet"], format="parquet"
     )
     assert result.equals(expected_table)
 
@@ -583,9 +583,7 @@ def test_to_arrow_normalizes_local_staging_paths(monkeypatch, tmp_path):
     result = job._to_arrow_internal()
 
     job.to_remote_storage.assert_called_once()
-    spark_module.ds.dataset.assert_called_once_with(
-        [f"file://{raw_path}"], format="parquet"
-    )
+    spark_module.ds.dataset.assert_called_once_with([raw_path], format="parquet")
     assert result.equals(expected_table)
 
 
