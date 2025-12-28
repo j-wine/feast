@@ -424,18 +424,24 @@ class SparkRetrievalJob(RetrievalJob):
         if not paths:
             return pyarrow.table({})
 
-        normalized_paths = self._normalize_staging_paths(paths)
+        parquet_paths = _filter_parquet_files(paths)
+        if not parquet_paths:
+            return pyarrow.table({})
+
+        normalized_paths = self._normalize_staging_paths(parquet_paths)
         dataset = ds.dataset(normalized_paths, format="parquet")
         return dataset.to_table()
 
     def _normalize_staging_paths(self, paths: List[str]) -> List[str]:
-        """Ensure each path has a URI scheme for PyArrow datasets."""
+        """Normalize staging paths for PyArrow datasets."""
         normalized = []
         for path in paths:
-            if "://" in path:
+            if path.startswith("file://"):
+                normalized.append(path[len("file://") :])
+            elif "://" in path:
                 normalized.append(path)
             else:
-                normalized.append(f"file://{path}")
+                normalized.append(path)
         return normalized
 
     def to_arrow_batches(
@@ -446,7 +452,11 @@ class SparkRetrievalJob(RetrievalJob):
             if not paths:
                 return iter([])
 
-            normalized_paths = self._normalize_staging_paths(paths)
+            parquet_paths = _filter_parquet_files(paths)
+            if not parquet_paths:
+                return iter([])
+
+            normalized_paths = self._normalize_staging_paths(parquet_paths)
             dataset = ds.dataset(normalized_paths, format="parquet")
             scanner = dataset.scan()
             return scanner.to_batches(batch_size=batch_size)
@@ -684,6 +694,10 @@ def _list_files_in_folder(folder):
             files.append(filename)
 
     return files
+
+
+def _filter_parquet_files(paths: List[str]) -> List[str]:
+    return [path for path in paths if path.endswith(".parquet")]
 
 
 def _list_hdfs_files(spark_session: SparkSession, uri: str) -> List[str]:
